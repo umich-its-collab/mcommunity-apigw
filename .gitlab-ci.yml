@@ -1,0 +1,14 @@
+---
+image: python:3.7
+
+stages:
+    - test
+
+test:
+    stage: test
+    before_script:
+        - pip install -U pip
+        - pip install -I -r python-requirements.txt
+        - cd tests/
+    script:
+        - pytest -v
