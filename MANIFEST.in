@@ -1,0 +1,4 @@
+include CHANGELOG.md
+include COPYING
+include VERSION
+include version.sh

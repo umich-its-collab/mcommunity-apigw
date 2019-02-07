@@ -44,3 +44,10 @@ def is_valid_name(name):
 @app.route("/inst/oauth2/token", methods=['POST'])
 def return_token():
     return '{"access_token": "a1b2c3d4c5d6e7f8g9h10i11j12k13l14"}'
+
+
+def main():
+    app.run()
+
+if __name__ == '__main__':
+    main()
