@@ -7,6 +7,7 @@ setup(name='umich_mcomm',
       author='Rob Carleski',
       author_email='carleski@umich.edu',
       license='MIT',
+      python_requires='>=3',
       packages=find_packages(),
       zip_safe=False)
 
