@@ -1,0 +1,24 @@
+{
+  "dn": "uid=testuser,ou=People,dc=umich,dc=edu",
+  "naming": "testuser",
+  "displayName": "Test Usersson",
+  "email": "testuser@umich.edu",
+  "displayTitle": "Application Operations System Administrator Senior",
+  "title": [
+    "Application Operations System Administrator Senior"
+  ],
+  "affiliation": [
+    "ITS Infra Sys Application Ops - Faculty and Staff",
+    "ITS Infrastrc - Systems - Faculty and Staff"
+  ],
+  "description": null,
+  "member": false,
+  "owner": false,
+  "moderator": false,
+  "person": true,
+  "group": false,
+  "external": false,
+  "securityEquals": null,
+  "groupMembership": null,
+  "role": null
+}

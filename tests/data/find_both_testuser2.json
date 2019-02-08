@@ -1,0 +1,26 @@
+[
+  {
+    "dn": "uid=testuser2,ou=People,dc=umich,dc=edu",
+    "naming": "testuser2",
+    "displayName": "Test Usersson Jr.",
+    "email": "testuser2@umich.edu",
+    "displayTitle": "Application Operations System Administrator Senior",
+    "title": [
+      "Application Operations System Administrator Senior"
+    ],
+    "affiliation": [
+      "ITS Infra Sys Application Ops - Faculty and Staff",
+      "ITS Infrastrc - Systems - Faculty and Staff"
+    ],
+    "description": null,
+    "member": false,
+    "owner": false,
+    "moderator": false,
+    "person": true,
+    "group": false,
+    "external": false,
+    "securityEquals": null,
+    "groupMembership": null,
+    "role": null
+  }
+]

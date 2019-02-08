@@ -1,12 +1,13 @@
-import flask
 import os
-import pytest
 import subprocess
+
+import pytest
+
+pytest_plugins = "pep8"
 
 
 @pytest.fixture(scope="session")
 def mock_mcomm():
-    os.environ["FLASK_APP"] = 'mock_mcomm.py'
-    p = subprocess.Popen(['flask', 'run'])
+    p = subprocess.Popen(['python3', os.path.join(os.path.dirname(__file__), 'mock_mcomm.py')])
     yield p
     p.kill()
