@@ -1,0 +1,83 @@
+[
+  {
+    "dn": "uid=testuser,ou=People,dc=umich,dc=edu",
+    "naming": "testuser",
+    "displayName": "Test Usersson",
+    "email": "testuser@umich.edu",
+    "displayTitle": "Application Operations System Administrator Senior",
+    "title": [
+      "Application Operations System Administrator Senior"
+    ],
+    "affiliation": [
+      "ITS Infra Sys Application Ops - Faculty and Staff",
+      "ITS Infrastrc - Systems - Faculty and Staff"
+    ],
+    "description": null,
+    "member": false,
+    "owner": false,
+    "moderator": false,
+    "person": true,
+    "group": false,
+    "external": false,
+    "securityEquals": null,
+    "groupMembership": null,
+    "role": null
+  },
+  {
+    "dn": "cn=testuser-group,ou=User Groups,ou=Groups,dc=umich,dc=edu",
+    "naming": null,
+    "displayName": "testuser-group",
+    "email": null,
+    "displayTitle": null,
+    "title": null,
+    "affiliation": null,
+    "description": null,
+    "member": false,
+    "owner": false,
+    "moderator": false,
+    "person": false,
+    "group": true,
+    "external": false,
+    "securityEquals": null,
+    "groupMembership": null,
+    "role": null
+  },
+  {
+    "dn": "cn=testuser-dev,ou=User Groups,ou=Groups,dc=umich,dc=edu",
+    "naming": null,
+    "displayName": "testuser-dev",
+    "email": null,
+    "displayTitle": null,
+    "title": null,
+    "affiliation": null,
+    "description": null,
+    "member": false,
+    "owner": false,
+    "moderator": false,
+    "person": false,
+    "group": true,
+    "external": false,
+    "securityEquals": null,
+    "groupMembership": null,
+    "role": null
+  },
+  {
+    "dn": "cn=test-testuser,ou=User Groups,ou=Groups,dc=umich,dc=edu",
+    "naming": null,
+    "displayName": "test-testuser",
+    "email": null,
+    "displayTitle": null,
+    "title": null,
+    "affiliation": null,
+    "description": null,
+    "member": false,
+    "owner": false,
+    "moderator": false,
+    "person": false,
+    "group": true,
+    "external": false,
+    "securityEquals": null,
+    "groupMembership": null,
+    "role": null
+  }
+]
