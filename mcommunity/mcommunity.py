@@ -128,14 +128,15 @@ class Client:
         )
         if r.status_code == requests.codes.ok:
             data = r.json()
-            if data[0]['person']:
-                return 'uid={},ou=people,dc=umich,dc=edu'.format(
-                    name
-                )
-            elif data[0]['group']:
-                return data[0]['dn'].lower()
-            else:
-                raise ValueError('Entity found but unidentifiable.')
+            for _ in data:
+                if _['person']:
+                    if _['naming'] == name:
+                        return _['dn']
+                elif _['group']:
+                    if _['displayName'] == name:
+                        return _['dn']
+
+            raise Exception('Unable to find matching entity.')
 
     def _apply_update(self, endpoint):
         """Generic update function
