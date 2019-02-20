@@ -6,12 +6,22 @@ from requests.packages.urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
 
 
-class Mcommunity:
+class Client:
 
-    def __init__(self, client_id='', secret='', config=False):
+    def __init__(self, config):
+        """Initialize a new Mcommunity API Client
 
-        self.client_id = client_id
-        self.secret = secret
+        Parameters
+        ----------
+        config : dict
+            A dictionary of configuration options. Must contain,
+            at minimum, 'client_id' and 'secret' keys.
+
+        Returns
+        -------
+        None
+        """
+
         self.url_base = 'https://apigw.it.umich.edu/um'
         self.timeout = 10
         self.port = 80

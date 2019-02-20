@@ -1,4 +1,4 @@
-from umich_mcomm import mcommunity
+import mcommunity
 
 config = {
     'client_id': '1234567890',
@@ -8,58 +8,58 @@ config = {
 
 
 def test_group_fetch(mock_mcomm):
-    conn = mcommunity.Mcommunity(config=config)
+    conn = mcommunity.Client(config=config)
     conn.fetch_group('testgroup')
     assert conn.group_data['name'] == 'testgroup'
 
 
 def test_person_fetch(mock_mcomm):
-    conn = mcommunity.Mcommunity(config=config)
+    conn = mcommunity.Client(config=config)
     person = conn.fetch_person('testuser')
     assert person['naming'] == 'testuser'
 
 
 def test_group_creation(mock_mcomm):
-    conn = mcommunity.Mcommunity(config=config)
+    conn = mcommunity.Client(config=config)
     conn.create_group('testgroup')
     assert conn.group_data['name'] == 'testgroup'
 
 
 def test_group_deletion(mock_mcomm):
-    conn = mcommunity.Mcommunity(config=config)
+    conn = mcommunity.Client(config=config)
     r = conn.delete_group('testgroup')
     assert r['status'] == 'success'
 
 
 def test_group_renew(mock_mcomm):
-    conn = mcommunity.Mcommunity(config=config)
+    conn = mcommunity.Client(config=config)
     r = conn.renew_group('testgroup')
     assert r['status'] == 'success'
 
 
 def test_group_update_aliases(mock_mcomm):
-    conn = mcommunity.Mcommunity(config=config)
+    conn = mcommunity.Client(config=config)
     conn.fetch_group('testgroup')
     conn.update_group_aliases('testalias')
     assert 'testalias' in conn.group_data['aliases']
 
 
 def test_group_update_description(mock_mcomm):
-    conn = mcommunity.Mcommunity(config=config)
+    conn = mcommunity.Client(config=config)
     conn.fetch_group('testgroup')
     conn.update_group_description('test description')
     assert conn.group_data['description'] == 'test description'
 
 
 def test_group_update_notice(mock_mcomm):
-    conn = mcommunity.Mcommunity(config=config)
+    conn = mcommunity.Client(config=config)
     conn.fetch_group('testgroup')
     conn.update_group_notice('test notice')
     assert conn.group_data['notice'] == 'test notice'
 
 
 def test_group_update_links_labeled(mock_mcomm):
-    conn = mcommunity.Mcommunity(config=config)
+    conn = mcommunity.Client(config=config)
     conn.fetch_group('testgroup')
     links = ('Test Link', 'https://test.link')
     conn.update_group_links(links)
@@ -68,7 +68,7 @@ def test_group_update_links_labeled(mock_mcomm):
 
 
 def test_group_update_links_plain(mock_mcomm):
-    conn = mcommunity.Mcommunity(config=config)
+    conn = mcommunity.Client(config=config)
     conn.fetch_group('testgroup')
     links = 'https://test.link'
     conn.update_group_links(links)
@@ -76,7 +76,7 @@ def test_group_update_links_plain(mock_mcomm):
 
 
 def test_group_owners_update(mock_mcomm):
-    conn = mcommunity.Mcommunity(config=config)
+    conn = mcommunity.Client(config=config)
     conn.fetch_group('testgroup')
     conn.add_group_owners('testuser2')
     testuser2 = conn._create_entity_ldap('testuser2')
@@ -86,7 +86,7 @@ def test_group_owners_update(mock_mcomm):
 
 
 def test_group_members_update(mock_mcomm):
-    conn = mcommunity.Mcommunity(config=config)
+    conn = mcommunity.Client(config=config)
     conn.fetch_group('testgroup')
     members = [
         'testuser2',

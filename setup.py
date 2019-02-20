@@ -16,7 +16,7 @@ test_deps = [
 ]
 
 setup(
-    name='umich_mcomm',
+    name='mcommunity',
     version=version,
     description='Library for interacting with MCommunity APIs',
     long_description=long_description,
