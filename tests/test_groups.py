@@ -25,6 +25,12 @@ def test_group_creation(mock_mcomm):
     assert conn.group_data['name'] == 'testgroup'
 
 
+def test_group_reservation(mock_mcomm):
+    conn = mcommunity.Client(config=config)
+    conn.reserve_group('testgroup')
+    assert conn.group_data['name'] == 'testgroup'
+
+
 def test_group_deletion(mock_mcomm):
     conn = mcommunity.Client(config=config)
     r = conn.delete_group('testgroup')

@@ -301,11 +301,34 @@ class Client:
         else:
             raise Exception('{}: {}'.format(r.status_code, r.text))
 
-    # TODO: This endpoint appears to be broken right now.
-    # We should come back to this, though.
-    # Endpoint: /reserve/{dn}
     def reserve_group(self, name):
-        pass
+        """Reserve a new mcommunity group
+
+        Parameters
+        ----------
+        name : str
+            The name of the mcommunity group to reserve
+
+        Returns
+        -------
+        none
+            Nothing returned. After creation, group is fetched.
+        """
+
+        if self._validate_name(name):
+            endpoint = self.call_url + '/reserve'
+            data = {
+                'name': name
+            }
+
+            self.session.post(
+                url=endpoint,
+                data=json.dumps(data),
+                headers=self.headers,
+                timeout=self.timeout
+            )
+
+            self.fetch_group(name)
 
     def update_group_aliases(self, aliases):
         """Update mcommunity group aliases
