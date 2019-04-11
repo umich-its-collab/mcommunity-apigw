@@ -1,5 +1,7 @@
 import requests
 import json
+import re
+import time
 
 from urllib.parse import quote
 from requests.packages.urllib3.util.retry import Retry
@@ -24,7 +26,8 @@ class Client:
 
         self.url_base = 'https://apigw.it.umich.edu/um'
         self.timeout = 10
-        self.port = 80
+        self.retries = 5
+        self.backoff_factor = 2
 
         if isinstance(config, dict):
             self.__dict__.update(config)
@@ -36,10 +39,11 @@ class Client:
         self.session = requests.Session()
         retries = Retry(
             total=5,
-            backoff_factor=0.2,
+            backoff_factor=1,
             status_forcelist=[500, 502, 503, 504]
         )
         self.session.mount('http://', HTTPAdapter(max_retries=retries))
+        self.session.mount('https://', HTTPAdapter(max_retries=retries))
 
         try:
             self._request_token()
@@ -100,7 +104,9 @@ class Client:
         )
 
         if r.json()['valid']:
-            return True
+            return name
+        elif not r.json()['valid']:
+            return re.sub(r'[^\w-]|[_]', ' ', name).strip()
         else:
             raise ValueError(r.json()['error'][0]['message'])
 
@@ -118,25 +124,32 @@ class Client:
             An LDAP string representation of the object.
         """
         if '=' in name or '@' in name:
-            return name
+            return name.lower()
 
         endpoint = self.call_url + '/find/both/{}'.format(name)
-        r = self.session.get(
-            url=endpoint,
-            headers=self.headers,
-            timeout=self.timeout
-        )
-        if r.status_code == requests.codes.ok:
-            data = r.json()
-            for _ in data:
-                if _['person']:
-                    if _['naming'] == name:
-                        return _['dn']
-                elif _['group']:
-                    if _['displayName'] == name:
-                        return _['dn']
+        for x in range(int(self.retries)):
+            r = self.session.get(
+                url=endpoint,
+                headers=self.headers,
+                timeout=self.timeout
+            )
+            if r.status_code == requests.codes.ok:
+                if r.json():
+                    break
+                else:
+                    time.sleep(float(self.backoff_factor)**x)
+                    continue
+        else:
+            raise Exception('Unable to find {} in Mcommunity'.format(name))
 
-            raise Exception('Unable to find matching entity.')
+        data = r.json()
+        for item in data:
+            if item['person']:
+                if item['naming'] == name:
+                    return item['dn'].lower()
+            elif item['group']:
+                if item['displayName'] == name:
+                    return item['dn'].lower()
 
     def _apply_update(self, endpoint):
         """Generic update function
@@ -152,16 +165,19 @@ class Client:
             A Requests response object
         """
         endpoint = self.call_url + endpoint
-        r = self.session.post(
-            url=endpoint,
-            data=json.dumps(self.group_data),
-            headers=self.headers,
-            timeout=self.timeout
-        )
-
-        if r.status_code == requests.codes.ok:
-            if r.json()['status'] == 'success':
-                return r
+        for x in range(int(self.retries)):
+            r = self.session.post(
+                url=endpoint,
+                data=json.dumps(self.group_data),
+                headers=self.headers,
+                timeout=self.timeout
+            )
+            if r.status_code == requests.codes.ok:
+                if r.json()['status'] == 'success':
+                    return r
+            else:
+                time.sleep(float(self.backoff_factor)**x)
+                continue
         else:
             raise Exception('{}: {}'.format(r.status_code, r.text))
 
@@ -180,18 +196,23 @@ class Client:
         """
 
         dn = self._create_entity_ldap(name)
-        encoded_dn = quote(dn)
-        endpoint = self.call_url + '/profile/dn/{}'.format(encoded_dn)
-        r = self.session.get(
-            url=endpoint,
-            headers=self.headers,
-            timeout=self.timeout
-        )
+        if dn:
+            encoded_dn = quote(dn)
+            endpoint = '{}/profile/dn/{}'.format(
+                self.call_url,
+                encoded_dn
+            )
+            r = self.session.get(
+                url=endpoint,
+                headers=self.headers,
+                timeout=self.timeout
+            )
 
-        if r.status_code == requests.codes.ok:
-            self.group_data = r.json()['group'][0]
-        else:
-            raise Exception('{}: {}'.format(r.status_code, r.text))
+            if r.status_code == requests.codes.ok:
+                print(r.json()['group'][0])
+                self.group_data = r.json()['group'][0]
+            else:
+                raise Exception('{}: {}'.format(r.status_code, r.text))
 
     def fetch_person(self, name):
         """Fetch information about a user from mcommunity
@@ -232,20 +253,18 @@ class Client:
             Nothing returned. After creation, group is fetched.
         """
 
-        if self._validate_name(name):
-            endpoint = self.call_url + '/create'
-            data = {
-                'name': name
-            }
+        name = self._validate_name(name)
+        endpoint = self.call_url + '/create'
+        data = {
+            'name': name
+        }
 
-            self.session.post(
-                url=endpoint,
-                data=json.dumps(data),
-                headers=self.headers,
-                timeout=self.timeout
-            )
-
-            self.fetch_group(name)
+        self.session.post(
+            url=endpoint,
+            data=json.dumps(data),
+            headers=self.headers,
+            timeout=self.timeout
+        )
 
     def delete_group(self, name):
         """Delete an mcommunity group
@@ -315,20 +334,32 @@ class Client:
             Nothing returned. After creation, group is fetched.
         """
 
-        if self._validate_name(name):
-            endpoint = self.call_url + '/reserve'
-            data = {
-                'name': name
-            }
+        name = self._validate_name(name)
+        endpoint = self.call_url + '/reserve'
+        data = {
+            'name': name
+        }
 
-            self.session.post(
-                url=endpoint,
-                data=json.dumps(data),
-                headers=self.headers,
-                timeout=self.timeout
-            )
+        for x in range(int(self.retries)):
+            try:
+                r = self.session.post(
+                    url=endpoint,
+                    data=json.dumps(data),
+                    headers=self.headers,
+                    timeout=self.timeout
+                )
+                break
+            except requests.exceptions.Timeout:
+                time.sleep(float(self.backoff_factor)**x)
+                continue
+        else:
+            raise Exception('Group reservation timed out.')
 
-            self.fetch_group(name)
+        if r.status_code == requests.codes.ok:
+            if r.json()['status'] == 'success':
+                return r
+        else:
+            raise Exception('{}: {}'.format(r.status_code, r.text))
 
     def update_group_aliases(self, aliases):
         """Update mcommunity group aliases
@@ -436,6 +467,7 @@ class Client:
         """
         if not isinstance(members, list):
             members = [members]
+
         members = [self._create_entity_ldap(x) for x in members]
 
         for member in members:
@@ -454,8 +486,6 @@ class Client:
                     self.group_data['memberExternal'].append({'email': member})
                 else:
                     self.group_data['memberExternal'] = [{'email': member}]
-
-        return self.update_group_members()
 
     def remove_group_members(self, members):
         """Remove members fron an mcommunity group.
@@ -490,11 +520,9 @@ class Client:
                 pass
 
         if purge_external:
-            for index, _ in enumerate(self.group_data['memberExternal']):
-                if _['email'] in members:
+            for index, item in enumerate(self.group_data['memberExternal']):
+                if item['email'] in members:
                     del(self.group_data['memberExternal'][index])
-
-        return self.update_group_members()
 
     def update_group_members(self):
         """Generic endpoint for updating members
@@ -569,10 +597,14 @@ class Client:
         """
         if not isinstance(owners, list):
             owners = [owners]
-        owners = [self._create_entity_ldap(x) for x in owners]
-        self.group_data['ownerDn'] += owners
 
-        return self.update_group_owners()
+        for owner in owners:
+            try:
+                self.group_data['ownerDn'].append(
+                    self._create_entity_ldap(owner)
+                )
+            except Exception as e:
+                pass
 
     def remove_group_owners(self, owners):
         """Remove mcommunity group owners
@@ -598,10 +630,7 @@ class Client:
             except ValueError:
                 pass
 
-        return self.update_group_owners()
-
     def update_group_owners(self):
-        return self._apply_update('/update/owner')
         """Generic endpoint for updating owners
 
         Parameters
@@ -613,6 +642,7 @@ class Client:
         dict
             A dict of response information from the server.
         """
+        return self._apply_update('/update/owner')
 
     def update_group_settings(self):
         """Generic endpoint for updating the following settings:
