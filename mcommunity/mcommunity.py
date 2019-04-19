@@ -1,5 +1,6 @@
 import requests
 import json
+import logging
 import re
 import time
 
@@ -24,6 +25,7 @@ class Client:
         None
         """
 
+        self.logger = logging.getLogger(__name__)
         self.url_base = 'https://apigw.it.umich.edu/um'
         self.timeout = 10
         self.retries = 5
@@ -126,6 +128,7 @@ class Client:
         if '=' in name or '@' in name:
             return name.lower()
 
+        name = self._validate_name(name)
         endpoint = self.call_url + '/find/both/{}'.format(name)
         for x in range(int(self.retries)):
             r = self.session.get(
@@ -209,7 +212,6 @@ class Client:
             )
 
             if r.status_code == requests.codes.ok:
-                print(r.json()['group'][0])
                 self.group_data = r.json()['group'][0]
             else:
                 raise Exception('{}: {}'.format(r.status_code, r.text))
@@ -505,6 +507,7 @@ class Client:
             members = [members]
         members = [self._create_entity_ldap(x) for x in members]
 
+        purge_external = False
         for member in members:
             try:
                 if 'uid=' in member:
@@ -513,10 +516,10 @@ class Client:
                     self.group_data['memberGroupDn'].remove(member)
                 elif '@' in member:
                     purge_external = True
-            except ValueError:
-                print('Couldnt remove {}'.format(member))
-                pass
-            except AttributeError:
+            except (ValueError, AttributeError):
+                self.logger.warning(
+                    'Unable to remove {} as member'.format(member)
+                )
                 pass
 
         if purge_external:
@@ -603,7 +606,7 @@ class Client:
                 self.group_data['ownerDn'].append(
                     self._create_entity_ldap(owner)
                 )
-            except Exception as e:
+            except Exception:
                 pass
 
     def remove_group_owners(self, owners):
