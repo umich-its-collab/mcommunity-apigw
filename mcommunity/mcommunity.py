@@ -381,13 +381,11 @@ class Client:
             aliases = [aliases]
 
         for alias in aliases:
-            if self._validate_name(alias):
-                if self.group_data['aliases']:
-                    self.group_data['aliases'].append(alias)
-                else:
-                    self.group_data['aliases'] = [alias]
+            clean_alias = self._validate_name(alias)
+            if self.group_data['aliases']:
+                self.group_data['aliases'].append(clean_alias)
             else:
-                print('{} is an invalid alias.'.format(alias))
+                self.group_data['aliases'] = [clean_alias]
 
         return self._apply_update('/update/aliases')
 
