@@ -212,7 +212,13 @@ class Client:
             )
 
             if r.status_code == requests.codes.ok:
-                self.group_data = r.json()['group'][0]
+                if 'umichgroup' in r.json()['group'][0]['objectClass']:
+                    self.group_data = r.json()['group'][0]
+                else:
+                    raise Exception('{} is not a group. Got [{}]'.format(
+                        name,
+                        ', '.join(r.json()['group'][0]['objectClass'])
+                    ))
             else:
                 raise Exception('{}: {}'.format(r.status_code, r.text))
 
