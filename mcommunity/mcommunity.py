@@ -215,7 +215,7 @@ class Client:
                 if 'umichgroup' in r.json()['group'][0]['objectClass']:
                     self.group_data = r.json()['group'][0]
                 else:
-                    raise Exception('{} is not a group. Got [{}]'.format(
+                    raise ValueError('{} is not a group. Got [{}]'.format(
                         name,
                         ', '.join(r.json()['group'][0]['objectClass'])
                     ))
