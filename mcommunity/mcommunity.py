@@ -84,6 +84,22 @@ class Client:
 
         self.token = r.json()['access_token']
 
+    def _patient_get(self, endpoint):
+        for x in range(int(self.retries)):
+            r = self.session.get(
+                url=self.call_url + endpoint,
+                headers=self.headers,
+                timeout=self.timeout
+            )
+            if r.status_code == requests.codes.ok:
+                if r.json():
+                    return r.json()
+                else:
+                    time.sleep(float(self.backoff_factor)**x)
+                    continue
+        else:
+            return False
+
     def _validate_name(self, name):
         """Validate a given name against MCommunity standards
 
@@ -129,30 +145,23 @@ class Client:
             return name.lower()
 
         name = self._validate_name(name)
-        endpoint = self.call_url + '/find/both/{}'.format(name)
-        for x in range(int(self.retries)):
-            r = self.session.get(
-                url=endpoint,
-                headers=self.headers,
-                timeout=self.timeout
-            )
-            if r.status_code == requests.codes.ok:
-                if r.json():
-                    break
-                else:
-                    time.sleep(float(self.backoff_factor)**x)
-                    continue
-        else:
-            raise Exception('Unable to find {} in Mcommunity'.format(name))
-
-        data = r.json()
-        for item in data:
-            if item['person']:
-                if item['naming'] == name:
-                    return item['dn'].lower()
-            elif item['group']:
-                if item['displayName'] == name:
-                    return item['dn'].lower()
+        data = self._patient_get('/find/both/{}'.format(name))
+        if data:
+            for item in data:
+                if item['person']:
+                    if item['naming'].lower() == name.lower():
+                        return item['dn'].lower()
+                elif item['group']:
+                    if item['displayName'].lower() == name.lower():
+                        return item['dn'].lower()
+                    else:
+                        _group = self._patient_get('/profile/dn/{}'.format(
+                            item['dn']
+                        ))
+                        if _group:
+                            if name in _group['group'][0]['aliases']:
+                                return item['dn'].lower()
+        raise Exception('Unable to find {} in Mcommunity'.format(name))
 
     def _apply_update(self, endpoint):
         """Generic update function

@@ -1,0 +1,21 @@
+[
+  {
+    "dn": "cn=testgroup,ou=User Groups,ou=Groups,dc=umich,dc=edu",
+    "naming": null,
+    "displayName": "testgroup",
+    "email": null,
+    "displayTitle": null,
+    "title": null,
+    "affiliation": null,
+    "description": null,
+    "member": false,
+    "owner": false,
+    "moderator": false,
+    "person": false,
+    "group": true,
+    "external": false,
+    "securityEquals": null,
+    "groupMembership": null,
+    "role": null
+  }
+]

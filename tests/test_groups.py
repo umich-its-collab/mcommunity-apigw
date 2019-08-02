@@ -13,6 +13,12 @@ def test_group_fetch(mock_mcomm):
     assert conn.group_data['name'] == 'testgroup'
 
 
+def test_group_fetch_by_cn(mock_mcomm):
+    conn = mcommunity.Client(config=config)
+    conn.fetch_group('alias1')
+    assert conn.group_data['name'] == 'testgroup'
+
+
 def test_person_fetch(mock_mcomm):
     conn = mcommunity.Client(config=config)
     person = conn.fetch_person('testuser')
