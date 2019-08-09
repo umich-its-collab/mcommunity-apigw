@@ -155,8 +155,9 @@ class Client:
                     if item['displayName'].lower() == name.lower():
                         return item['dn'].lower()
                     else:
+                        encoded_dn = quote(item['dn'])
                         _group = self._patient_get('/profile/dn/{}'.format(
-                            item['dn']
+                            encoded_dn
                         ))
                         if _group:
                             if name in _group['group'][0]['aliases']:
