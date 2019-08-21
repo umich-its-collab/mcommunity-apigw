@@ -152,15 +152,22 @@ class Client:
                     if item['naming'].lower() == name.lower():
                         return item['dn'].lower()
                 elif item['group']:
-                    if item['displayName'].lower() == name.lower():
+                    hname = re.sub('[\._]', ' ', name).lower()
+                    if item['displayName'].lower() == hname:
                         return item['dn'].lower()
                     else:
                         encoded_dn = quote(item['dn'])
-                        _group = self._patient_get('/profile/dn/{}'.format(
+                        group = self._patient_get('/profile/dn/{}'.format(
                             encoded_dn
                         ))
-                        if _group:
-                            if name in _group['group'][0]['aliases']:
+                        if group:
+                            if isinstance(group['group'][0]['aliases'], list):
+                                names = group['group'][0]['aliases']
+                                names.append(group['group'][0]['name'])
+                            else:
+                                names = [group['group'][0]['name']]
+                            names = [x.lower() for x in names]
+                            if hname in names:
                                 return item['dn'].lower()
         raise Exception('Unable to find {} in Mcommunity'.format(name))
 
@@ -220,7 +227,6 @@ class Client:
                 headers=self.headers,
                 timeout=self.timeout
             )
-
             if r.status_code == requests.codes.ok:
                 if 'umichgroup' in r.json()['group'][0]['objectClass']:
                     self.group_data = r.json()['group'][0]
@@ -355,7 +361,7 @@ class Client:
         name = self._validate_name(name)
         endpoint = self.call_url + '/reserve'
         data = {
-            'name': name
+            'name': re.sub('[\._]', ' ', name)
         }
 
         for x in range(int(self.retries)):
