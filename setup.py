@@ -29,6 +29,7 @@ setup(
     packages=find_packages(),
     install_requires=[
         'requests',
+        'ldap3',
     ],
     setup_requires=[
         'pytest-runner',
