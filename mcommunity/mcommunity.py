@@ -7,6 +7,7 @@ import time
 from urllib.parse import quote
 from requests.packages.urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
+from ldap3.utils.dn import parse_dn
 
 
 class Client:
@@ -152,7 +153,7 @@ class Client:
                     if item['naming'].lower() == name.lower():
                         return item['dn'].lower()
                 elif item['group']:
-                    hname = re.sub('[\._]', ' ', name).lower()
+                    hname = re.sub(r'[\._]', ' ', name).lower()
                     if item['displayName'].lower() == hname:
                         return item['dn'].lower()
                     else:
@@ -230,6 +231,17 @@ class Client:
             if r.status_code == requests.codes.ok:
                 if 'umichgroup' in r.json()['group'][0]['objectClass']:
                     self.group_data = r.json()['group'][0]
+                    self.group_data['members'] = []
+                    if isinstance(self.group_data['memberDn'], list):
+                        for member in self.group_data['memberDn']:
+                            self.group_data['members'].append(
+                                parse_dn(member)[0][1]
+                            )
+                    if isinstance(self.group_data['memberGroupDn'], list):
+                        for member in self.group_data['memberGroupDn']:
+                            self.group_data['members'].append(
+                                parse_dn(member)[0][1]
+                            )
                 else:
                     raise ValueError('{} is not a group. Got [{}]'.format(
                         name,
@@ -361,7 +373,7 @@ class Client:
         name = self._validate_name(name)
         endpoint = self.call_url + '/reserve'
         data = {
-            'name': re.sub('[\._]', ' ', name)
+            'name': re.sub(r'[\._]', ' ', name)
         }
 
         for x in range(int(self.retries)):
