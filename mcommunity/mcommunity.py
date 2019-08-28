@@ -234,7 +234,6 @@ class Client:
                     self.group_data['members'] = []
                     self.group_data['memberGroups'] = []
                     self.group_data['expandedMembers'] = []
-                    print('gronp')
                     subclient = Client({
                         'client_id': self.client_id,
                         'secret': self.secret
