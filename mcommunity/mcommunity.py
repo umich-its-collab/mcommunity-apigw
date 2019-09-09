@@ -191,7 +191,7 @@ class MCommGroup:
                     group['owners_details'] = group.pop('owners')
                     tmp_hash = hashlib.md5(json.dumps(group).encode('utf-8'))
                     if hasattr(self, 'group_hash'):
-                        if tmp_hash == self.group_hash:
+                        if tmp_hash.hexdigest() == self.group_hash.hexdigest():
                             sleep(2**i)
                             continue
                     if 'umichgroup' in group['objectClass']:
