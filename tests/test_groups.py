@@ -2,7 +2,7 @@ import json
 import os
 import pytest
 from unittest import mock
-from mcommunity.mcommunity import MCommClient
+from mcommunity import MCommClient
 
 
 data_dir = os.path.join(os.path.dirname(__file__) + '/data/')
