@@ -3,3 +3,4 @@
 hacking_dir=$(readlink -fn $(dirname "$BASH_SOURCE"))
 VIRTUAL_ENV_DISABLE_PROMPT=1
 . $hacking_dir/venv/bin/activate
+PATH=$hacking_dir/mcommunity/:$PATH

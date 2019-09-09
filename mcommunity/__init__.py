@@ -1,1 +1,2 @@
-from .mcommunity import Client
+from .mcommunity import MCommClient
+from .core import MCommError

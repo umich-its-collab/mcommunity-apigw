@@ -1,120 +1,47 @@
-import mcommunity
-
-config = {
-    'client_id': '1234567890',
-    'secret': '123abc-456def-789ghi',
-    'url_base': 'http://localhost:5000'
-}
+import json
+import os
+import pytest
+from unittest import mock
+from mcommunity.mcommunity import MCommClient
 
 
-def test_group_fetch(mock_mcomm):
-    conn = mcommunity.Client(config=config)
-    conn.fetch_group('testgroup')
-    assert conn.group_data['name'] == 'testgroup'
+data_dir = os.path.join(os.path.dirname(__file__) + '/data/')
 
 
-def test_group_fetch_by_cn(mock_mcomm):
-    conn = mcommunity.Client(config=config)
-    conn.fetch_group('alias1')
-    assert conn.group_data['name'] == 'testgroup'
+@pytest.fixture
+def mcclient():
+    def _loader(filenames):
+        for fname in filenames:
+            with open(data_dir + fname, 'r') as f:
+                data = json.load(f)
+            yield data
+
+    @mock.patch('mcommunity.mcommunity.MCommSession')
+    def _client(json_files, session):
+        session.return_value.get.return_value.json.side_effect = _loader(
+            json_files
+        )
+        session.return_value.token = '12345'
+        client = MCommClient(client_id='12345', secret='abdce')
+        return client
+
+    return _client
 
 
-def test_person_fetch(mock_mcomm):
-    conn = mcommunity.Client(config=config)
-    person = conn.fetch_person('testuser')
-    assert person['naming'] == 'testuser'
-
-
-def test_group_creation(mock_mcomm):
-    conn = mcommunity.Client(config=config)
-    conn.create_group('testgroup')
-
-
-def test_group_reservation(mock_mcomm):
-    conn = mcommunity.Client(config=config)
-    conn.reserve_group('testgroup')
-
-
-def test_group_deletion(mock_mcomm):
-    conn = mcommunity.Client(config=config)
-    r = conn.delete_group('testgroup')
-    assert r['status'] == 'success'
-
-
-def test_group_renew(mock_mcomm):
-    conn = mcommunity.Client(config=config)
-    r = conn.renew_group('testgroup')
-    assert r['status'] == 'success'
-
-
-def test_group_update_aliases(mock_mcomm):
-    conn = mcommunity.Client(config=config)
-    conn.fetch_group('testgroup')
-    conn.update_group_aliases('testalias')
-    assert 'testalias' in conn.group_data['aliases']
-
-
-def test_group_update_description(mock_mcomm):
-    conn = mcommunity.Client(config=config)
-    conn.fetch_group('testgroup')
-    conn.update_group_description('test description')
-    assert conn.group_data['description'] == 'test description'
-
-
-def test_group_update_notice(mock_mcomm):
-    conn = mcommunity.Client(config=config)
-    conn.fetch_group('testgroup')
-    conn.update_group_notice('test notice')
-    assert conn.group_data['notice'] == 'test notice'
-
-
-def test_group_update_links_labeled(mock_mcomm):
-    conn = mcommunity.Client(config=config)
-    conn.fetch_group('testgroup')
-    links = ('Test Link', 'https://test.link')
-    conn.update_group_links(links)
-    assert conn.group_data['labeledUri'][0]['urlLabel'] == 'Test Link'
-    assert conn.group_data['labeledUri'][0]['urlValue'] == 'https://test.link'
-
-
-def test_group_update_links_plain(mock_mcomm):
-    conn = mcommunity.Client(config=config)
-    conn.fetch_group('testgroup')
-    links = 'https://test.link'
-    conn.update_group_links(links)
-    assert conn.group_data['labeledUri'][0]['urlValue'] == 'https://test.link'
-
-
-def test_group_owners_update(mock_mcomm):
-    conn = mcommunity.Client(config=config)
-    conn.fetch_group('testgroup')
-    conn.add_group_owners('testuser2')
-    conn.update_group_owners()
-    testuser2 = conn._create_entity_ldap('testuser2')
-    assert testuser2 in conn.group_data['ownerDn']
-    conn.remove_group_owners('testuser2')
-    conn.update_group_owners()
-    assert testuser2 not in conn.group_data['ownerDn']
-
-
-def test_group_members_update(mock_mcomm):
-    conn = mcommunity.Client(config=config)
-    conn.fetch_group('testgroup')
-    members = [
-        'testuser2',
-        'testgroup2',
-        'test@domain.tld'
+def test_group_fetch(mcclient):
+    response_files = [
+        'find_both_testgroup.json',
+        'profile_testgroup.json'
     ]
-    conn.add_group_members(members)
-    conn.update_group_members()
-    testuser2 = conn._create_entity_ldap('testuser2')
-    testgroup2 = conn._create_entity_ldap('testgroup2')
-    externalMember = 'test@domain.tld'
-    assert testuser2 in conn.group_data['memberDn']
-    assert testgroup2 in conn.group_data['memberGroupDn']
-    assert conn.group_data['memberExternal'][0]['email'] == externalMember
-    conn.remove_group_members(members)
-    conn.update_group_members()
-    assert testuser2 not in conn.group_data['memberDn']
-    assert testgroup2 not in conn.group_data['memberGroupDn']
-    assert not conn.group_data['memberExternal']
+    group = mcclient(response_files).group('testgroup')
+    assert group.dn
+
+
+def test_group_fetch_by_cn(mcclient):
+    response_files = [
+        'find_both_alias1.json',
+        'profile_testgroup.json',
+        'profile_testgroup.json'
+    ]
+    group = mcclient(response_files).group('alias1')
+    assert group.dn
