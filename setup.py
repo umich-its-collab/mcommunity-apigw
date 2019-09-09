@@ -11,7 +11,7 @@ with open(os.path.join(os.path.dirname(__file__), 'README.md'), 'r') as f:
 
 test_deps = [
     'pytest',
-    'pytest-pep8',
+    'pytest-flake8',
     'flask',
 ]
 
