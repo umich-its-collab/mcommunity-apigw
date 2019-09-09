@@ -1,43 +1,28 @@
+import hashlib
 import requests
 import json
-import logging
-import re
-import time
 
-from urllib.parse import quote
+from . import core
+from time import sleep
+from ldap3.utils.dn import parse_dn
+from ldap3.core.exceptions import LDAPInvalidDnError
 from requests.packages.urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
-from ldap3.utils.dn import parse_dn
+from requests.exceptions import Timeout
+from urllib.parse import quote
 
 
-class Client:
+class MCommSession(requests.Session):
 
-    def __init__(self, config):
-        """Initialize a new Mcommunity API Client
+    def __init__(self, client_id, secret, **kwargs):
 
-        Parameters
-        ----------
-        config : dict
-            A dictionary of configuration options. Must contain,
-            at minimum, 'client_id' and 'secret' keys.
-
-        Returns
-        -------
-        None
-        """
-
-        self.logger = logging.getLogger(__name__)
-        self.url_base = 'https://apigw.it.umich.edu/um'
-        self.timeout = 10
-        self.retries = 5
-        self.backoff_factor = 2
-
-        if isinstance(config, dict):
-            self.__dict__.update(config)
-
-        self.scope = 'iamgroups'
-        self.token_url = self.url_base + '/inst/oauth2/token'
-        self.call_url = self.url_base + '/iamGroups'
+        super(MCommSession, self).__init__(**kwargs)
+        url_base = 'https://apigw.it.umich.edu/um'
+        token_url = ('{}/inst/oauth2/token?'
+                     'grant_type=client_credentials&'
+                     'scope=iamgroups'.format(url_base)
+                     )
+        self.call_url = url_base + '/iamGroups'
 
         self.session = requests.Session()
         retries = Retry(
@@ -45,675 +30,853 @@ class Client:
             backoff_factor=1,
             status_forcelist=[500, 502, 503, 504]
         )
+
+        self.headers.update({
+            'accept': 'application/json'
+        })
+
         self.session.mount('http://', HTTPAdapter(max_retries=retries))
         self.session.mount('https://', HTTPAdapter(max_retries=retries))
 
         try:
-            self._request_token()
+            self._request_token(token_url, client_id, secret)
         except KeyError:
             raise KeyError('Unable to get access token from API')
 
-        self.headers = {
-            'x-ibm-client-id': '{}'.format(self.client_id),
+        self.headers.update({
+            'x-ibm-client-id': '{}'.format(client_id),
             'authorization': 'Bearer {}'.format(self.token),
-            'accept': 'application/json'
-        }
+        })
 
-    def _request_token(self):
-        data = {
-            'grant_type': 'client_credentials',
-            'scope': 'constituents'
-        }
-
-        headers = {
-            'Content-type': 'application/x-www-form-urlencoded',
-            'accept': 'application/json'
-        }
-
-        url_append = '?grant_type=client_credentials&scope={}'.format(
-            self.scope
-        )
-        url = self.token_url + url_append
-
-        r = self.session.post(
-            url,
-            data=json.dumps(data),
-            headers=headers,
-            auth=(self.client_id, self.secret),
-            timeout=self.timeout
-        )
-
-        self.token = r.json()['access_token']
-
-    def _patient_get(self, endpoint):
-        for x in range(int(self.retries)):
-            r = self.session.get(
-                url=self.call_url + endpoint,
-                headers=self.headers,
-                timeout=self.timeout
-            )
-            if r.status_code == requests.codes.ok:
-                if r.json():
-                    return r.json()
-                else:
-                    time.sleep(float(self.backoff_factor)**x)
-                    continue
-        else:
-            return False
-
-    def _validate_name(self, name):
-        """Validate a given name against MCommunity standards
+    def _request_token(self, token_url, client_id, secret):
+        """Request a token from the MCommunity API
 
         Parameters
         ----------
-        name : str
-            The name to validate
-
-        Returns
-        -------
-        boolean
-            true or false, depending on validity status.
-        """
-
-        endpoint = self.call_url + '/isValidName/{}'.format(name)
-        r = self.session.get(
-            url=endpoint,
-            headers=self.headers,
-            timeout=self.timeout
-        )
-
-        if r.json()['valid']:
-            return name
-        elif not r.json()['valid']:
-            return re.sub(r'[^\w-]|[_]', ' ', name).strip()
-        else:
-            raise ValueError(r.json()['error'][0]['message'])
-
-    def _create_entity_ldap(self, name):
-        """Create an LDAP string for a given object
-
-        Parameters
-        ---------
-        name : str
-            The name of the object
-
-        Returns
-        -------
-        str
-            An LDAP string representation of the object.
-        """
-        if '=' in name or '@' in name:
-            return name.lower()
-
-        name = self._validate_name(name)
-        data = self._patient_get('/find/both/{}'.format(name))
-        if data:
-            for item in data:
-                if item['person']:
-                    if item['naming'].lower() == name.lower():
-                        return item['dn'].lower()
-                elif item['group']:
-                    hname = re.sub(r'[\._]', ' ', name).lower()
-                    if item['displayName'].lower() == hname:
-                        return item['dn'].lower()
-                    else:
-                        encoded_dn = quote(item['dn'])
-                        group = self._patient_get('/profile/dn/{}'.format(
-                            encoded_dn
-                        ))
-                        if group:
-                            if isinstance(group['group'][0]['aliases'], list):
-                                names = group['group'][0]['aliases']
-                                names.append(group['group'][0]['name'])
-                            else:
-                                names = [group['group'][0]['name']]
-                            names = [x.lower() for x in names]
-                            if hname in names:
-                                return item['dn'].lower()
-        raise Exception('Unable to find {} in Mcommunity'.format(name))
-
-    def _apply_update(self, endpoint):
-        """Generic update function
-
-        Parameters
-        ----------
-        endpoint : str
-            The API endpoint to POST data to
-
-        Returns
-        -------
-        obj
-            A Requests response object
-        """
-        endpoint = self.call_url + endpoint
-        for x in range(int(self.retries)):
-            r = self.session.post(
-                url=endpoint,
-                data=json.dumps(self.group_data),
-                headers=self.headers,
-                timeout=self.timeout
-            )
-            if r.status_code == requests.codes.ok:
-                if r.json()['status'] == 'success':
-                    return r
-            else:
-                time.sleep(float(self.backoff_factor)**x)
-                continue
-        else:
-            raise Exception('{}: {}'.format(r.status_code, r.text))
-
-    def fetch_group(self, name):
-        """Fetch information for an mcommunity group
-
-        Parameters
-        ----------
-        name : str
-            The name of the mcommunity group to fetch data for
+        token_url : string
+        client_id : string
+        secret : string
 
         Returns
         -------
         None
-            Nothing returned; self.group_data is populated instead.
         """
 
-        dn = self._create_entity_ldap(name)
-        if dn:
-            encoded_dn = quote(dn)
-            endpoint = '{}/profile/dn/{}'.format(
-                self.call_url,
-                encoded_dn
-            )
-            r = self.session.get(
-                url=endpoint,
-                headers=self.headers,
-                timeout=self.timeout
-            )
-            if r.status_code == requests.codes.ok:
-                if 'umichgroup' in r.json()['group'][0]['objectClass']:
-                    self.group_data = r.json()['group'][0]
-                    self.group_data['members'] = []
-                    self.group_data['memberGroups'] = []
-                    self.group_data['expandedMembers'] = []
-                    subclient = Client({
-                        'client_id': self.client_id,
-                        'secret': self.secret
-                    })
-                    if isinstance(self.group_data['memberDn'], list):
-                        for member in self.group_data['memberDn']:
-                            self.group_data['members'].append(
-                                parse_dn(member)[0][1]
-                            )
-                            self.group_data['expandedMembers'].append(
-                                parse_dn(member)[0][1]
-                            )
-                    if isinstance(self.group_data['memberGroupDn'], list):
-                        for member in self.group_data['memberGroupDn']:
-                            self.group_data['memberGroups'].append(
-                                parse_dn(member)[0][1]
-                            )
-                            subclient.fetch_group(member)
-                            for m in subclient.group_data['expandedMembers']:
-                                if m not in self.group_data['expandedMembers']:
-                                    self.group_data['expandedMembers'].append(
-                                        m
-                                    )
-                else:
-                    raise ValueError('{} is not a group. Got [{}]'.format(
-                        name,
-                        ', '.join(r.json()['group'][0]['objectClass'])
-                    ))
-            else:
-                raise Exception('{}: {}'.format(r.status_code, r.text))
+        r = self.post(
+            token_url,
+            data=json.dumps({
+                'grant_type': 'client_credentials',
+                'scope': 'constituents'
+            }),
+            auth=(client_id, secret)
+        )
 
-    def fetch_person(self, name):
-        """Fetch information about a user from mcommunity
+        self.token = r.json()['access_token']
+
+    def request(self, method, url, **kwargs):
+        """Patched version of requests.Session.request with magic
 
         Parameters
         ----------
-        name : str
-            The uniqname of the user to fetch data for
+        method : string
+        url : string
 
         Returns
         -------
-        dict
-            A dict of user information
+        obj : A magic request object
         """
-        endpoint = self.call_url + '/find/person/{}'.format(name)
-        r = self.session.get(
-            url=endpoint,
-            headers=self.headers,
-            timeout=self.timeout
-        )
 
-        if r.status_code == requests.codes.ok:
-            return r.json()
-        else:
-            raise Exception('{}: {}'.format(r.status_code, r.text))
+        if not url.lower().startswith('http'):
+            url = ''.join([self.call_url, url])
+        return super(MCommSession, self).request(method, url, **kwargs)
 
-    def create_group(self, name):
+
+class MCommGroup:
+
+    def __init__(self, client, name):
+        self.client = client
+        self.name = name
+        self.fetch()
+
+    @property
+    def exists(self):
+        return bool(self.dn)
+
+    @property
+    def expandedMembers(self):
+        if not hasattr(self, '_expandedMembers'):
+            groups = set([self.name])
+            processed = set()
+            members = set()
+            while groups != processed:
+                for group in groups.difference(processed):
+                    processed.add(group)
+                    _group = MCommGroup(self.client, group)
+                    groups.update(_group.memberGroups)
+                    members.update(_group.members)
+            self._expandedMembers = list(members)
+        return self._expandedMembers
+
+    @property
+    def externalMembers(self):
+        if not hasattr(self, '_externalMembers'):
+            if not isinstance(self.memberExternal, list):
+                self.memberExternal = []
+            self._externalMembers = [x['dn'] for x in self.memberExternal]
+        return self._externalMembers
+
+    @property
+    def links(self):
+        if not hasattr(self, '_links'):
+            if not isinstance(self.urlLinks, list):
+                self.urlLinks = []
+            self._links = [x['labeledUri'] for x in self.urlLinks]
+        return self._links
+
+    @property
+    def members(self):
+        if not hasattr(self, '_members'):
+            if not isinstance(self.memberDn, list):
+                self.memberDn = []
+            self._members = [parse_dn(x)[0][1] for x in self.memberDn]
+        return self._members
+
+    @property
+    def memberGroups(self):
+        if not hasattr(self, '_memberGroups'):
+            if not isinstance(self.memberGroupDn, list):
+                self.memberGroupDn = []
+            self._memberGroups = [
+                parse_dn(x)[0][1] for x in self.memberGroupDn
+            ]
+        return self._memberGroups
+
+    @property
+    def moderators(self):
+        if not hasattr(self, '_moderators'):
+            if not isinstance(self.moderator, list):
+                self.moderator = []
+            self._moderators = [x['dn'] for x in self.moderator]
+        return self._moderators
+
+    @property
+    def owners(self):
+        if not hasattr(self, '_owners'):
+            if not isinstance(self.ownerDn, list):
+                self.ownerDn = []
+            self._owners = [parse_dn(x)[0][1] for x in self.ownerDn]
+        return self._owners
+
+    def fetch(self, targets=False):
+        """Fetch information for an mcommunity group
+
+        Parameters
+        ----------
+        targets : list
+            Only fetch new data for attributes in this list
+
+        Returns
+        -------
+        None
+        """
+
+        self.dn = core.get_entity_dn(self.client, self.name)
+        if self.dn:
+            for i in range(5):
+                r = self.client.get(
+                    url='/profile/dn/{}'.format(quote(self.dn))
+                )
+                if r.ok:
+                    group = r.json()['group'][0]
+                    group['owners_details'] = group.pop('owners')
+                    tmp_hash = hashlib.md5(json.dumps(group).encode('utf-8'))
+                    if hasattr(self, 'group_hash'):
+                        if tmp_hash == self.group_hash:
+                            sleep(2**i)
+                            continue
+                    if 'umichgroup' in group['objectClass']:
+                        self.group_hash = tmp_hash
+                        if targets:
+                            for target in targets:
+                                setattr(self, target, group[target])
+                        else:
+                            self.__dict__.update(group)
+                    else:
+                        raise core.MCommError(
+                            'Entity found is {}, not group'.format(
+                                ', '.join(group['objectClass'])
+                            )
+                        )
+                    break
+                else:
+                    raise core.MCommError('{}: {}'.format(
+                        r.status_code,
+                        r.text
+                        )
+                    )
+            else:
+                raise core.MCommError('Unable to fetch fresh group data')
+
+    def create(self):
         """Create a new mcommunity group
 
         Parameters
         ----------
-        name : str
-            The name of the mcommunity group to create
+        None
 
         Returns
         -------
-        none
-            Nothing returned. After creation, group is fetched.
+        None
         """
 
-        name = self._validate_name(name)
-        endpoint = self.call_url + '/create'
-        data = {
-            'name': name
-        }
+        core.validate_name(self.client, self.name)
 
-        self.session.post(
-            url=endpoint,
-            data=json.dumps(data),
-            headers=self.headers,
-            timeout=self.timeout
-        )
+        # Testing shows that this is a black hole.
+        # We should expect this to time out, and move on.
+        try:
+            self.client.post(
+                url='/create',
+                data=json.dumps({'name': self.name}),
+            )
+        except Timeout:
+            pass
 
-    def delete_group(self, name):
+        self.fetch()
+        return self
+
+    def delete(self):
         """Delete an mcommunity group
 
         Parameters
         ----------
-        name : str
-            The name of the group to delete
+        None
 
         Returns
         -------
-        dict
-            A dict of response information from the server.
+        None
         """
 
-        dn = self._create_entity_ldap(name)
-        encoded_dn = quote(dn)
-        endpoint = self.call_url + '/delete/{}'.format(encoded_dn)
-        r = self.session.get(
-            url=endpoint,
-            headers=self.headers,
-            timeout=self.timeout
+        r = self.client.get(
+            url='/delete/{}'.format(quote(self.dn))
         )
-        if r.status_code == requests.codes.ok:
-            return r.json()
-        else:
-            raise Exception('{}: {}'.format(r.status_code, r.text))
 
-    def renew_group(self, name):
+        if r.ok:
+            self.fetch()
+        else:
+            raise core.MCommError('{}: {}'.format(r.status_code, r.text))
+
+    def renew(self):
         """Renew an mcommunity group
 
         Parameters
         ----------
-        name : str
-            The name of the group to renew
+        None
 
         Returns
         -------
-        dict
-            A dict of response information from the server.
+        None
         """
-        dn = self._create_entity_ldap(name)
-        encoded_dn = quote(dn)
-        endpoint = self.call_url + '/renew/{}'.format(encoded_dn)
-        r = self.session.get(
-            url=endpoint,
-            headers=self.headers,
-            timeout=self.timeout
+
+        r = self.client.get(
+            url='/renew/{}'.format(quote(self.dn))
         )
 
-        if r.status_code == requests.codes.ok:
-            return r.json()
+        if r.ok:
+            self.fetch()
         else:
-            raise Exception('{}: {}'.format(r.status_code, r.text))
+            raise core.MCommError('{}: {}'.format(r.status_code, r.text))
 
-    def reserve_group(self, name):
+    def reserve(self):
         """Reserve a new mcommunity group
 
         Parameters
         ----------
-        name : str
-            The name of the mcommunity group to reserve
+        None
 
         Returns
         -------
-        none
-            Nothing returned. After creation, group is fetched.
+        None
         """
 
-        name = self._validate_name(name)
-        endpoint = self.call_url + '/reserve'
-        data = {
-            'name': re.sub(r'[\._]', ' ', name)
-        }
+        core.validate_name(self.client, self.name)
+        # Testing shows that this is a black hole.
+        # We should expect this to time out, and move on.
+        try:
+            self.client.post(
+                url='/reserve',
+                data=json.dumps({'name': self.name}),
+                timeout=5
+            )
+        except Timeout:
+            pass
 
-        for x in range(int(self.retries)):
-            try:
-                r = self.session.post(
-                    url=endpoint,
-                    data=json.dumps(data),
-                    headers=self.headers,
-                    timeout=self.timeout
-                )
-                break
-            except requests.exceptions.Timeout:
-                time.sleep(float(self.backoff_factor)**x)
-                continue
-        else:
-            raise Exception('Group reservation timed out.')
+        self.fetch()
+        return self
 
-        if r.status_code == requests.codes.ok:
-            if r.json()['status'] == 'success':
-                return r
-        else:
-            raise Exception('{}: {}'.format(r.status_code, r.text))
-
-    def update_group_aliases(self, aliases):
+    def update_aliases(self):
         """Update mcommunity group aliases
 
         Parameters
         ----------
-        aliases : str, list
-            A single alias, or a list thereof.
+        None
 
         Returns
         -------
-        dict
-            A dict of response information from the server.
+        None
         """
 
-        if not isinstance(aliases, list):
-            aliases = [aliases]
+        r = self.client.post(
+            url='/update/aliases',
+            data=json.dumps({
+                'dn': self.dn,
+                'aliases': self.aliases
+            })
+        )
+        if r.ok:
+            self.fetch(['aliases'])
+        else:
+            raise core.MCommError('{}: {}'.format(r.status_code, r.text))
 
-        for alias in aliases:
-            clean_alias = self._validate_name(alias)
-            if self.group_data['aliases']:
-                self.group_data['aliases'].append(clean_alias)
-            else:
-                self.group_data['aliases'] = [clean_alias]
-
-        return self._apply_update('/update/aliases')
-
-    def update_group_description(self, description):
+    def update_description(self):
         """Update mcommunity group description
 
         Parameters
         ----------
-        description : str
-            A description to apply to the group.
+        None
 
         Returns
         -------
-        dict
-            A dict of response information from the server.
+        None
         """
-        self.group_data['description'] = str(description)
-        return self._apply_update('/update/description')
 
-    def update_group_notice(self, notice):
+        _valid_levels = ['PUBLIC', 'PROTECTED', 'PRIVATE']
+        if self.descriptionLevel.upper() not in _valid_levels:
+            raise core.MCommError('Invalid description level. Valid options '
+                                  'are PUBLIC, PROTECTED, and PRIVATE.')
+        r = self.client.post(
+            url='/update/description',
+            data=json.dumps({
+                'dn': self.dn,
+                'description': self.description,
+                'descriptionLevel': self.descriptionLevel.upper()
+            })
+        )
+        if r.ok:
+            self.fetch(['description', 'descriptionLevel'])
+        else:
+            raise core.MCommError('{}: {}'.format(r.status_code, r.text))
+
+    def update_errors_to(self):
+        """Update mcommunity errorsTo
+
+        Uniqnames or dn/cns can be appeneded to self.errorsTo
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
+
+        for item in self.errorsTo:
+            try:
+                parse_dn(item)
+            except LDAPInvalidDnError:
+                _index = self.errorsTo.index(item)
+                dn = core.get_entity_dn(self.client, item)
+                self.errorsTo[_index] = dn
+
+        r = self.client.post(
+            url='/update/errorsTo',
+            data=json.dumps({
+                'dn': self.dn,
+                'errorsTo': self.errorsTo
+            })
+        )
+        if r.ok:
+            self.fetch(['errorsTo'])
+        else:
+            raise core.MCommError('{}: {}'.format(r.status_code, r.text))
+
+    def update_errors_to_external(self):
+        """Update mcommunity errorsToExternal
+
+        Addresses can be added to self.errorsToExternal in these formats:
+
+        str : user@domain.tld
+        str : Test User <user@domain.tld>
+        dict : {'name': 'Test User', 'email': 'user@domain.tld'}
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
+
+        for item in self.errorsToExternal:
+            if not isinstance(item, dict):
+                _index = self.errorsToExternal.index(item)
+                self.errorsToExternal[_index] = {'email': item}
+
+        r = self.client.post(
+            url='/update/errorsToExternalMember',
+            data=json.dumps({
+                'dn': self.dn,
+                'errorsToExternal': self.errorsToExternal
+            })
+        )
+        if r.ok:
+            self.fetch(['errorsToExternal', 'errorsToExternalRaw'])
+        else:
+            raise core.MCommError('{}: {}'.format(r.status_code, r.text))
+
+    def update_external_members(self):
+        """Update mcommunity group external members
+
+        External members can be added to self.externalMembers in these formats:
+
+        str : user@domain.tld
+        str : Test User <user@domain.tld>
+        dict : {'name': 'Test User', 'email': 'user@domain.tld'}
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
+
+        self.memberExternal = []
+        for member in self.externalMembers:
+            if isinstance(member, dict):
+                self.memberExternal.append(member)
+            else:
+                self.memberExternal.append({'email': member})
+
+        r = self.client.post(
+            url='/update/externalMember',
+            data=json.dumps({
+                'dn': self.dn,
+                'memberExternal': self.memberExternal
+            })
+        )
+        if r.ok:
+            del(self._externalMembers)
+            self.fetch(['memberExternal', 'memberExternalRaw'])
+        else:
+            raise core.MCommError('{}: {}'.format(r.status_code, r.text))
+
+    def update_links(self):
+        """Update mcommunity group external links
+
+        Links can be added to self.links in these formats:
+        str : https://www.google.com
+        str : Google https://www.google.com
+        str : https://www.google.com Google
+        dict: {'urlName' : 'Google', 'urlValue': 'https://www.google.com'}
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
+
+        self.urlLinks = []
+        for item in self.links:
+            if isinstance(item, dict):
+                link = '{} {}'.format(
+                    item['urlValue'],
+                    item['urlName']
+                )
+            elif ' ' in item:
+                _split = item.split(' ')
+                for part in _split:
+                    if 'http:' in part or 'https:' in part:
+                        _url = _split.pop(_split.index(part))
+                        break
+                link = '{} {}'.format(_url, ' '.join(_split))
+                _url = ''
+            else:
+                link = item
+
+            self.urlLinks.append({'labeledUri': link})
+
+        r = self.client.post(
+            url='/update/links',
+            data=json.dumps({
+                'dn': self.dn,
+                'urlLinks': self.urlLinks
+            })
+        )
+        if r.ok:
+            del(self._links)
+            self.fetch(['urlLinks', 'labeledUri'])
+        else:
+            raise core.MCommError('{}: {}'.format(r.status_code, r.text))
+
+    def update_membership(self):
+        """Shortcut for updating all membership types at onces
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
+
+        self.update_members()
+        self.update_member_groups()
+        self.update_external_members()
+
+    def update_members(self):
+        """Update members of an mcommunity group.
+
+        Group members should be added to self.members by uniqname.
+        However, using an ldap string should work, too.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
+
+        self.memberDn = []
+        for member in self.members:
+            self.memberDn.append(core.get_entity_dn(
+                self.client,
+                member
+                )
+            )
+
+        r = self.client.post(
+            url='/update/member',
+            data=json.dumps({
+                'dn': self.dn,
+                'memberDn': self.memberDn
+            })
+        )
+        if r.ok:
+            del(self._members)
+            self.fetch(['memberDn'])
+        else:
+            raise core.MCommError('{}: {}'.format(r.status_code, r.text))
+
+    def update_member_groups(self):
+        """Update member groups of an mcommunity group.
+
+        Groups can be added to self.memberGroups by dn or cn.
+        However, full ldap strings should work here as well.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
+
+        self.memberGroupDn = []
+        for member in self.memberGroups:
+            self.memberGroupDn.append(core.get_entity_dn(
+                self.client,
+                member
+                )
+            )
+        r = self.client.post(
+            url='/update/groupMember',
+            data=json.dumps({
+                'dn': self.dn,
+                'memberGroupDn': self.memberGroupDn
+            })
+        )
+        if r.ok:
+            del(self._memberGroups)
+            if hasattr(self, '_expandedMembers'):
+                del(self._expandedMembers)
+            self.fetch(['memberGroupDn', 'groupMemberDnRaw'])
+        else:
+            raise core.MCommError('{}: {}'.format(r.status_code, r.text))
+
+    def update_moderators(self):
+        """Update mcommunity group moderators
+
+        Moderators can be added to self.externalMembers in these formats:
+
+        str : user@domain.tld
+        str : Test User <user@domain.tld>
+        dict : {'name': 'Test User', 'email': 'user@domain.tld'}
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
+
+        self.moderator = []
+        for mod in self.moderators:
+            if isinstance(mod, dict):
+                self.moderator.append(mod)
+            else:
+                self.moderator.append({'email': mod})
+
+        r = self.client.post(
+            url='/update/moderator',
+            data=json.dumps({
+                'dn': self.dn,
+                'moderator': self.moderator
+            })
+        )
+
+        if r.ok:
+            del(self._moderators)
+            self.fetch(['moderator', 'moderatorRaw'])
+        else:
+            raise core.MCommError('{}: {}'.format(r.status_code, r.text))
+
+    def update_notice(self):
         """Update mcommunity group notice
 
         Parameters
         ----------
-        notice : str
-            A notice to apply to the group.
+        None
 
         Returns
         -------
-        dict
-            A dict of response information from the server.
+        Notice
         """
-        self.group_data['notice'] = str(notice)
-        return self._apply_update('/update/notice')
 
-    def update_group_links(self, links):
-        """Update mcommunity group external links
+        _valid_levels = ['PUBLIC', 'PROTECTED', 'PRIVATE']
+        if self.noticeLevel.upper() not in _valid_levels:
+            raise core.MCommError('Invalid notice level. Valid options are '
+                                  'PUBLIC, PROTECTED, and PRIVATE.')
+
+        r = self.client.post(
+            url='/update/notice',
+            data=json.dumps({
+                'dn': self.dn,
+                'notice': self.notice,
+                'noticeLevel': self.noticeLevel.upper()
+            })
+        )
+        if r.ok:
+            self.fetch(['notice', 'noticeLevel'])
+        else:
+            raise core.MCommError('{}: {}'.format(r.status_code, r.text))
+
+    def update_ownership(self):
+        """Alias function for update_owners
 
         Parameters
         ----------
-        links : str, tuple, list
-            A single HTTP link, a tuple of (name,uri), or a list of either.
+        None
 
         Returns
         -------
-        dict
-            A dict of response information from the server.
+        None
         """
-        if not isinstance(links, list):
-            links = [links]
 
-        if not self.group_data['labeledUri']:
-            self.group_data['labeledUri'] = []
+        self.update_owners()
 
-        for link in links:
-            if isinstance(link, tuple):
-                self.group_data['labeledUri'].append({
-                    'urlLabel': link[0],
-                    'urlValue': link[1]
-                })
-            else:
-                self.group_data['labeledUri'].append({'urlValue': link})
-
-        return self._apply_update('/update/links')
-
-    def add_group_members(self, members):
-        """Add members to an mcommunity group.
+    def update_owners(self):
+        """Update owners of an mcommunity group.
 
         Parameters
         ----------
-        members : str, list
-            A single uniqname, group name, or external member address, or
-            a list containing any combination thereof.
+        None
 
         Returns
         -------
-        dict
-            A dict of response information from the server.
+        None
         """
-        if not isinstance(members, list):
-            members = [members]
 
-        members = [self._create_entity_ldap(x) for x in members]
-
-        for member in members:
-            if 'uid=' in member:
-                if self.group_data['memberDn']:
-                    self.group_data['memberDn'].append(member)
-                else:
-                    self.group_data['memberDn'] = [member]
-            elif 'cn=' in member:
-                if self.group_data['memberGroupDn']:
-                    self.group_data['memberGroupDn'].append(member)
-                else:
-                    self.group_data['memberGroupDn'] = [member]
-            elif '@' in member:
-                if self.group_data['memberExternal']:
-                    self.group_data['memberExternal'].append({'email': member})
-                else:
-                    self.group_data['memberExternal'] = [{'email': member}]
-
-    def remove_group_members(self, members):
-        """Remove members fron an mcommunity group.
-
-        Parameters
-        ----------
-        members : str, list
-            A single uniqname, group name, or external member address, or
-            a list containing any combination thereof.
-
-        Returns
-        -------
-        dict
-            A dict of response information from the server.
-        """
-        if not isinstance(members, list):
-            members = [members]
-        members = [self._create_entity_ldap(x) for x in members]
-
-        purge_external = False
-        for member in members:
-            try:
-                if 'uid=' in member:
-                    self.group_data['memberDn'].remove(member)
-                elif 'cn=' in member:
-                    self.group_data['memberGroupDn'].remove(member)
-                elif '@' in member:
-                    purge_external = True
-            except (ValueError, AttributeError):
-                self.logger.warning(
-                    'Unable to remove {} as member'.format(member)
+        self.ownerDn = []
+        for owner in self.owners:
+            self.ownerDn.append(core.get_entity_dn(
+                self.client,
+                owner
                 )
-                pass
+            )
 
-        if purge_external:
-            for index, item in enumerate(self.group_data['memberExternal']):
-                if item['email'] in members:
-                    del(self.group_data['memberExternal'][index])
+        r = self.client.post(
+            url='/update/owner',
+            data=json.dumps({
+                'dn': self.dn,
+                'ownerDn': self.ownerDn
+            })
+        )
+        if r.ok:
+            del(self._owners)
+            self.fetch(['ownerDn', 'owners_details'])
+        else:
+            raise core.MCommError('{}: {}'.format(r.status_code, r.text))
 
-    def update_group_members(self):
-        """Generic endpoint for updating members
+    def update_request_to(self):
+        """Update mcommunity requestTo
 
-        Parameters
-        ----------
-        none
-
-        Returns
-        -------
-        dict
-            A dict of response information from the server.
-        """
-        endpoints = [
-            '/update/member',
-            '/update/groupMember',
-            '/update/externalMember'
-        ]
-
-        results = []
-
-        for endpoint in endpoints:
-            r = self._apply_update(endpoint)
-            results.append(r)
-
-        return results
-
-    def update_group_moderators(self, moderators):
-        """Update mcommunity group moderators
+        Uniqnames or dn/cns can be appeneded to self.requestTo
 
         Parameters
         ----------
-        links : str, tuple, list
-            A single email address, a tuple of (name,address), or
-            a list of either.
+        None
 
         Returns
         -------
-        dict
-            A dict of response information from the server.
+        None
         """
-        if not isinstance(moderators, list):
-            moderators = [moderators]
 
-        if not self.group_data['moderator']:
-            self.group_data['moderator'] = []
-
-        for moderator in moderators:
-            if isinstance(moderator, tuple):
-                self.group_data['moderator'].append({
-                    'name': moderator[0],
-                    'email': moderator[1]
-                })
-            else:
-                self.group_data['moderator'].append({'email': moderator})
-
-        return self._apply_update('/update/moderator')
-
-    def add_group_owners(self, owners):
-        """Add mcommunity group owners
-
-        Parameters
-        ----------
-        links : str, list
-            A single owner user or group, or a list of a combination
-            of either
-
-        Returns
-        -------
-        dict
-            A dict of response information from the server.
-        """
-        if not isinstance(owners, list):
-            owners = [owners]
-
-        for owner in owners:
+        for item in self.requestTo:
             try:
-                self.group_data['ownerDn'].append(
-                    self._create_entity_ldap(owner)
-                )
-            except Exception:
-                pass
+                parse_dn(item)
+            except LDAPInvalidDnError:
+                _index = self.requestTo.index(item)
+                dn = core.get_entity_dn(self.client, item)
+                self.requestTo[_index] = dn
 
-    def remove_group_owners(self, owners):
-        """Remove mcommunity group owners
+        r = self.client.post(
+            url='/update/requestTo',
+            data=json.dumps({
+                'dn': self.dn,
+                'requestTo': self.requestTo
+            })
+        )
+        if r.ok:
+            self.fetch(['requestTo'])
+        else:
+            raise core.MCommError('{}: {}'.format(r.status_code, r.text))
+
+    def update_request_to_external(self):
+        """Update mcommunity requestToExternal
+
+        Addresses can be added to self.requestToExternal in these formats:
+
+        str : user@domain.tld
+        str : Test User <user@domain.tld>
+        dict : {'name': 'Test User', 'email': 'user@domain.tld'}
 
         Parameters
         ----------
-        links : str, list
-            A single owner user or group, or a list of a combination
-            of either
+            none
 
         Returns
         -------
         dict
             A dict of response information from the server.
         """
-        if not isinstance(owners, list):
-            owners = [owners]
-        owners = [self._create_entity_ldap(x) for x in owners]
 
-        for owner in owners:
-            try:
-                self.group_data['ownerDn'].remove(owner)
-            except ValueError:
-                pass
+        for item in self.requestToExternal:
+            if not isinstance(item, dict):
+                _index = self.requestToExternal.index(item)
+                self.requestToExternal[_index] = {'email': item}
 
-    def update_group_owners(self):
-        """Generic endpoint for updating owners
+        r = self.client.post(
+            url='/update/requestToExternalMember',
+            data=json.dumps({
+                'dn': self.dn,
+                'requestToExternal': self.requestToExternal
+            })
+        )
+        if r.ok:
+            self.fetch(['requestToExternal', 'requestToExternalRaw'])
+        else:
+            raise core.MCommError('{}: {}'.format(r.status_code, r.text))
 
-        Parameters
-        ----------
-        none
-
-        Returns
-        -------
-        dict
-            A dict of response information from the server.
-        """
-        return self._apply_update('/update/owner')
-
-    def update_group_settings(self):
+    def update_settings(self):
         """Generic endpoint for updating the following settings:
-            - isprivate
-            - isjoinable
+            - isPrivate
+            - isJoinable
             - IsSpamBlocked
             - IsEmailableByMembersOnly
-            - IsEmailWarningSuspended
-
-        Attributes are updated manually, and function is run. Example:
-        conn = fetch_group('testgroup')
-        conn.group_data['isprivate'] = True
-        conn.update_group_settings()
+            - IsEmailWarningSuppressed
 
         Parameters
         ----------
-        none
+        None
 
         Returns
         -------
-        dict
-            A dict of response information from the server.
+        None
         """
-        return self._apply_update('/update/settings')
+
+        r = self.client.post(
+            url='/update/settings',
+            data=json.dumps({
+                'dn': self.dn,
+                'isPrivate': self.isPrivate,
+                'isJoinable': self.isJoinable,
+                'isSpamBlocked': self.isSpamBlocked,
+                'isEmailableByMembersOnly': self.isEmailableByMembersOnly,
+                'isEmailWarningSuppressed': self.isEmailWarningSuppressed
+            })
+        )
+        if r.ok:
+            self.fetch([
+                'isPrivate',
+                'isJoinable',
+                'isSpamBlocked',
+                'isEmailableByMembersOnly',
+                'isEmailWarningSuppressed'
+            ])
+        else:
+            raise core.MCommError('{}: {}'.format(r.status_code, r.text))
+
+
+class MCommPerson:
+
+    def __init__(self, client, uniqname):
+        self.client = client
+        self.uniqname = uniqname
+        self.fetch()
+
+    def fetch(self):
+        """Fetch information about a user from mcommunity
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
+        r = self.client.get(
+            url='/find/person/{}'.format(self.uniqname)
+        )
+
+        # The API returns a 200 here no matter what.
+        # The best way to determine if there's data is
+        # probably to just check the dumped text response.
+        if r.text:
+            self.__dict__.update(r.json())
+        else:
+            raise core.MCommError('No matching user found')
+
+
+class MCommClient:
+
+    def __init__(self, client_id, secret):
+        self.client = MCommSession(client_id, secret)
+
+    def group(self, groupname):
+        return MCommGroup(self.client, groupname)
+
+    def person(self, uniqname):
+        return MCommPerson(self.client, uniqname)
