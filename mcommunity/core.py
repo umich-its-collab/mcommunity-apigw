@@ -53,7 +53,7 @@ def get_entity_dn(client, name):
                 if item['naming'].casefold() == name.casefold():
                     return item['dn']
             elif item['group']:
-                if item['displayName'].casefold() == name.casefold():
+                if item['displayName'].casefold() == name:
                     return item['dn']
                 else:
                     r = client.get('/profile/dn/{}'.format(
