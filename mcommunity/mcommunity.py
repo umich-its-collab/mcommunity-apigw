@@ -120,32 +120,24 @@ class MCommGroup:
     @property
     def externalMembers(self):
         if not hasattr(self, '_externalMembers'):
-            if not isinstance(self.memberExternal, list):
-                self.memberExternal = []
             self._externalMembers = [x['dn'] for x in self.memberExternal]
         return self._externalMembers
 
     @property
     def links(self):
         if not hasattr(self, '_links'):
-            if not isinstance(self.urlLinks, list):
-                self.urlLinks = []
             self._links = [x['labeledUri'] for x in self.urlLinks]
         return self._links
 
     @property
     def members(self):
         if not hasattr(self, '_members'):
-            if not isinstance(self.memberDn, list):
-                self.memberDn = []
             self._members = [parse_dn(x)[0][1] for x in self.memberDn]
         return self._members
 
     @property
     def memberGroups(self):
         if not hasattr(self, '_memberGroups'):
-            if not isinstance(self.memberGroupDn, list):
-                self.memberGroupDn = []
             self._memberGroups = [
                 parse_dn(x)[0][1] for x in self.memberGroupDn
             ]
@@ -154,20 +146,16 @@ class MCommGroup:
     @property
     def moderators(self):
         if not hasattr(self, '_moderators'):
-            if not isinstance(self.moderator, list):
-                self.moderator = []
             self._moderators = [x['dn'] for x in self.moderator]
         return self._moderators
 
     @property
     def owners(self):
         if not hasattr(self, '_owners'):
-            if not isinstance(self.ownerDn, list):
-                self.ownerDn = []
             self._owners = [parse_dn(x)[0][1] for x in self.ownerDn]
         return self._owners
 
-    def fetch(self, targets=False):
+    def fetch(self, targets=None):
         """Fetch information for an mcommunity group
 
         Parameters
@@ -181,41 +169,66 @@ class MCommGroup:
         """
 
         self.dn = core.get_entity_dn(self.client, self.name)
-        if self.dn:
-            for i in range(5):
-                r = self.client.get(
-                    url='/profile/dn/{}'.format(quote(self.dn))
-                )
-                if r.ok:
-                    group = r.json()['group'][0]
-                    group['owners_details'] = group.pop('owners')
-                    tmp_hash = hashlib.md5(json.dumps(group).encode('utf-8'))
-                    if hasattr(self, 'group_hash'):
-                        if tmp_hash.hexdigest() == self.group_hash.hexdigest():
-                            sleep(2**i)
-                            continue
-                    if 'umichgroup' in group['objectClass']:
-                        self.group_hash = tmp_hash
-                        if targets:
-                            for target in targets:
-                                setattr(self, target, group[target])
-                        else:
-                            self.__dict__.update(group)
-                    else:
-                        raise core.MCommError(
-                            'Entity found is {}, not group'.format(
-                                ', '.join(group['objectClass'])
-                            )
-                        )
-                    break
-                else:
-                    raise core.MCommError('{}: {}'.format(
+
+        if not self.dn:
+            return
+
+        # Updated data isn't always available immediately, so try to loop
+        # for a bit if we don't see any change.
+        # FIXME: people might call fetch when there actually haven't been any
+        # changes, so this should probably be controlled by a flag.
+        for i in range(5):
+            r = self.client.get(
+                url='/profile/dn/{}'.format(quote(self.dn))
+            )
+            if not r.ok:
+                raise core.MCommError('{}: {}'.format(
                         r.status_code,
-                        r.text
-                        )
+                        r.text,
                     )
-            else:
-                raise core.MCommError('Unable to fetch fresh group data')
+                )
+
+            group = r.json()['group'][0]
+            group['owners_details'] = group.pop('owners')
+            new_hash = hashlib.md5(
+                json.dumps(group, sort_keys=True).encode('utf-8')
+            )
+            new_hash = new_hash.hexdigest()
+            if getattr(self, 'group_hash', None) != new_hash:
+                self.group_hash = new_hash
+                break
+
+            if i < 4:
+                sleep(2**i)
+
+        if not getattr(self, 'group_hash', None):
+            raise core.MCommError('Unable to fetch fresh group data')
+
+        group['objectClass'] = [x.lower() for x in group['objectClass']]
+        if 'umichgroup' not in group['objectClass']:
+            raise core.MCommError(
+                    'Entity found is {}, not group'.format(
+                        ', '.join(group['objectClass'])
+                    )
+                )
+
+        if targets:
+            for target in targets:
+                setattr(self, target, group[target])
+        else:
+            self.__dict__.update(group)
+
+        # Make sure that our list attrs are at least empty lists
+        for attr in [
+            'memberDn',
+            'memberExternal',
+            'memberGroupDn',
+            'moderator',
+            'ownerDn',
+            'urlLinks',
+        ]:
+            if not getattr(self, attr, None):
+                setattr(self, attr, [])
 
     def create(self):
         """Create a new mcommunity group
