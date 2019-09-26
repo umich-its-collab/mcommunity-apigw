@@ -2,7 +2,7 @@ import os
 
 from subprocess import check_output
 
-from setuptools import setup, find_packages
+from setuptools import setup
 
 version = check_output(['bash', os.path.join(os.path.dirname(__file__), 'version.sh')]).decode(encoding='utf-8')
 
@@ -26,7 +26,9 @@ setup(
     author_email='carleski@umich.edu',
     license='MIT',
     python_requires='>=3',
-    packages=find_packages(),
+    packages=[
+        'mcommunity',
+    ],
     install_requires=[
         'requests',
         'ldap3',
