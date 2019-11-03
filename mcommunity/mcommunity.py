@@ -549,10 +549,13 @@ class MCommGroup:
         None
         """
         if self.memberDn or self.members:
+            self.members
             self.update_members()
         if self.memberGroupDn or self.memberGroups:
+            self.memberGroups
             self.update_member_groups()
         if self.memberExternal or self.externalMembers:
+            self.externalMembers
             self.update_external_members()
 
     def update_members(self):
