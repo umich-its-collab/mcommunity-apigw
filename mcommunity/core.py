@@ -1,3 +1,4 @@
+from time import sleep
 from urllib.parse import quote
 
 
@@ -45,7 +46,19 @@ def get_entity_dn(client, name):
     if '=' in name or '@' in name:
         return name
 
-    data = client.get('/find/both/{}'.format(name)).json()
+    for i in range(3):
+        data = client.get('/find/both/{}'.format(name)).json()
+        if data:
+            try:
+                assert type(data[0]) == dict
+                break
+            except AssertionError:
+                sleep(2)
+                continue
+            else:
+                raise MCommError('Searching MCommunity failed.')
+        else:
+            raise MCommError('Unable to find specified entity')
 
     if data:
         for item in data:

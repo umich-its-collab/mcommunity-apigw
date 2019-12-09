@@ -6,3 +6,4 @@ venv/
 .eggs
 VERSION
 umich_mcomm.egg-info
+livetest.py
