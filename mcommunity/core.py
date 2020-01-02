@@ -58,7 +58,7 @@ def get_entity_dn(client, name):
             else:
                 raise MCommError('Searching MCommunity failed.')
         else:
-            raise MCommError('Unable to find specified entity')
+            raise MCommError('Unable to find "{}" in MCommunity'.format(name))
 
     if data:
         for item in data:
