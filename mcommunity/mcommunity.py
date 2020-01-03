@@ -168,7 +168,10 @@ class MCommGroup:
         None
         """
 
-        self.dn = core.get_entity_dn(self.client, self.name)
+        try:
+            self.dn = core.get_entity_dn(self.client, self.name)
+        except core.MCommEntityNotFound:
+            self.dn = None
 
         if not self.dn:
             return
