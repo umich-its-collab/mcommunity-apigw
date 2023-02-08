@@ -14,14 +14,13 @@ from urllib.parse import quote
 
 class MCommSession(requests.Session):
 
-    def __init__(self, client_id, secret, **kwargs):
-
+    def __init__(self, client_id, secret, environment='prod', **kwargs):
         super(MCommSession, self).__init__(**kwargs)
-        url_base = 'https://apigw.it.umich.edu/um'
-        token_url = ('{}/inst/oauth2/token?'
-                     'grant_type=client_credentials&'
-                     'scope=iamgroups'.format(url_base)
-                     )
+        if environment == 'prod':
+            url_base = 'https://gw.api.it.umich.edu/um'
+        else:
+            url_base = f'https://gw-{environment}.api.it.umich.edu/um'
+        token_url = f'{url_base}/oauth2/token?grant_type=client_credentials&scope=iamgroups'
         self.call_url = url_base + '/iamGroups'
 
         self.session = requests.Session()
@@ -44,7 +43,6 @@ class MCommSession(requests.Session):
             raise KeyError('Unable to get access token from API')
 
         self.headers.update({
-            'x-ibm-client-id': '{}'.format(client_id),
             'authorization': 'Bearer {}'.format(self.token),
         })
 
@@ -70,7 +68,6 @@ class MCommSession(requests.Session):
             }),
             auth=(client_id, secret)
         )
-
         self.token = r.json()['access_token']
 
     def request(self, method, url, **kwargs):
@@ -893,8 +890,8 @@ class MCommPerson:
 
 class MCommClient:
 
-    def __init__(self, client_id, secret):
-        self.client = MCommSession(client_id, secret)
+    def __init__(self, client_id, secret, environment='prod'):
+        self.client = MCommSession(client_id, secret, environment)
 
     def group(self, groupname):
         return MCommGroup(self.client, groupname)
