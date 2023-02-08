@@ -68,7 +68,6 @@ class MCommSession(requests.Session):
             }),
             auth=(client_id, secret)
         )
-        print(r.json())
         self.token = r.json()['access_token']
 
     def request(self, method, url, **kwargs):
